@@ -2,12 +2,15 @@ import AppKit
 import Combine
 import CoreGraphics
 import Network
+import IOKit.hid
 import AfterscreenCore
 
 /// Menu bar popover state; connects by hand or automatically
 public final class AppModel: ObservableObject {
     @Published public var receivers: [DiscoveredReceiver] = []
-    @Published public var snapshot = SenderSnapshot()
+    @Published public var snapshot = SenderSnapshot() {
+        didSet { refreshBrightnessKeys() }
+    }
     @Published public var activeReceiver: String?
     @Published public var screenRecordingGranted = CGPreflightScreenCaptureAccess()
     @Published public var lastMessage: String?
@@ -25,6 +28,8 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var macVolume: OutputLevel?
     public let macName = ComputerName.current
 
+    @Published public private(set) var brightnessKeysReady = false
+    private let brightnessKeys = BrightnessKeys()
     public let settings: SenderSettings
     private var session: SenderSession?
     private let discovery = Discovery()
@@ -66,6 +71,13 @@ public final class AppModel: ObservableObject {
                 pairings: PairingStoring = KeychainPairingStore(service: "io.github.lakystars.afterscreen.sender.pairing")) {
         self.settings = settings
         self.pairings = pairings
+        brightnessKeys.shouldHandle = { [weak self] in
+            guard let self = self else { return false }
+            return self.snapshot.isStreaming && !self.isTesting && self.snapshot.macBrightness == nil
+        }
+        brightnessKeys.onPress = { [weak self] action in self?.adjustReceiverBrightness(action) }
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in self?.refreshBrightnessKeys() }.store(in: &cancellables)
         pairedIDs = Set(pairings.pairs.map(\.id))
         discovery.onChange = { [weak self] list in
             guard let self = self else { return }
@@ -444,6 +456,33 @@ public final class AppModel: ObservableObject {
     private func readVolume() {
         let level = SystemOutput().level
         if macVolume != level { macVolume = level }
+    }
+
+    private func refreshBrightnessKeys() {
+        let ready = brightnessKeys.setEnabled(snapshot.isStreaming && !isTesting && snapshot.macBrightness == nil)
+        if brightnessKeysReady != ready { brightnessKeysReady = ready }
+    }
+
+    public func enableBrightnessKeys() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        refreshBrightnessKeys()
+        if !AXIsProcessTrusted() {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        } else if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted {
+            _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!)
+        }
+
+    }
+
+    private func adjustReceiverBrightness(_ action: BrightnessKeys.Action) {
+        // Follow mode has no source on a Mac mini. First press starts from the
+        // receiver's reported brightness; held keys use our latest requested value.
+        let level = settings.brightnessFollows ? (snapshot.receiver?.panelLevel ?? settings.receiverBrightness) : settings.receiverBrightness
+        settings.receiverBrightness = BrightnessKeys.adjusted(level, action: action)
+        NSLog("[AfterscreenBrightness] applied direction=%d level=%.3f", action.direction, settings.receiverBrightness)
+        if settings.brightnessFollows { settings.brightnessFollows = false }
     }
 
     /// Default output; the receiver follows while it plays

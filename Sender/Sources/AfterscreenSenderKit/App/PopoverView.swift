@@ -552,6 +552,15 @@ private struct BrightnessCard: View {
                     Text(L10n.t("\(mac) has no built-in screen on; \(receiver) keeps its brightness", "\(mac)에 켜진 내장 화면이 없어 \(receiver) 밝기를 그대로 둡니다"))
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
+                if model.snapshot.isStreaming && model.snapshot.macBrightness == nil {
+                    if model.brightnessKeysReady {
+                        Text("F1/F2 and brightness keys adjust \(receiver) while connected.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    } else {
+                        Button("Enable keyboard brightness control…") { model.enableBrightnessKeys() }
+                            .help("Allow Afterscreen in Accessibility and, if requested, Input Monitoring. Press the sun keys directly, without Fn, while connected.")
+                    }
+                }
                 if !settings.brightnessFollows {
                     LevelSlider(name: receiver, value: settings.receiverBrightness) {
                         settings.receiverBrightness = $0
