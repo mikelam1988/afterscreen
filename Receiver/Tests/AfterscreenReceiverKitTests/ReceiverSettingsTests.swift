@@ -24,6 +24,17 @@ final class ReceiverSettingsTests: XCTestCase {
         ReceiverSettings(defaults: defaults, agentDirectory: agents, bundleID: "io.github.lakystars.afterscreen.receiver")
     }
 
+    func testConnectionRequestPreferencesPersist() {
+        let first = settings()
+        XCTAssertTrue(first.requestConnectionOnWake)
+        XCTAssertNil(first.lastSenderID)
+        first.requestConnectionOnWake = false
+        first.lastSenderID = "paired-sender"
+        let second = settings()
+        XCTAssertFalse(second.requestConnectionOnWake)
+        XCTAssertEqual(second.lastSenderID, "paired-sender")
+    }
+
     func testDefaultsAndPersistence() {
         let s = settings()
         XCTAssertEqual(s.accept, .any)

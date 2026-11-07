@@ -26,6 +26,9 @@ struct ReceiverSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Toggle(L10n.t("Open at login", "로그인 시 열기"), isOn: Binding(get: { settings.launchAtLogin }, set: { settings.launchAtLogin = $0 }))
+            Toggle("Request last paired sender on launch or wake", isOn: $settings.requestConnectionOnWake)
+            Text("The sender must be running and reachable. Connect and pair once before using this feature.")
+                .font(.caption).foregroundColor(.secondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(L10n.t("Accept connections over", "받을 연결")).font(.headline)
                 Picker("", selection: $settings.accept) {

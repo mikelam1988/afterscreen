@@ -84,6 +84,7 @@ public final class AppModel: ObservableObject {
             let fresh = AppModel.listsNewEndpoint(old: self.receivers, new: list)
             self.receivers = list
             self.refreshLinks()
+            self.acceptReceiverRequests(list)
             if fresh { self.considerAutoConnect() }
         }
         discovery.start()
@@ -175,6 +176,25 @@ public final class AppModel: ObservableObject {
 
     /// Receiver default points, else the last receiver's; labels display sizes
     public var panelPoints: PixelSize? { snapshot.peer?.panelPoints ?? settings.lastPanelPoints }
+
+    /// Consume a valid request once, even across sender restarts. Never replace an active session.
+    private func acceptReceiverRequests(_ list: [DiscoveredReceiver]) {
+        for receiver in list {
+            guard let request = receiver.connectRequest,
+                  let key = pairings.key(for: receiver.deviceID),
+                  request.verifies(senderID: settings.deviceID, receiverID: receiver.deviceID, key: key) else { continue }
+            let preference = "receiverConnectRequest." + receiver.deviceID
+            let now = Date().timeIntervalSince1970
+            var seen = (UserDefaults.standard.dictionary(forKey: preference) as? [String: Double] ?? [:])
+                .filter { $0.value >= now - 150 }
+            let token = request.nonce.base64EncodedString()
+            guard seen[token] == nil else { continue }
+            seen[token] = now
+            UserDefaults.standard.set(seen, forKey: preference)
+            guard session == nil, !isTesting, sleepReady == nil, CGPreflightScreenCaptureAccess() else { continue }
+            start(receiver, manual: true)
+        }
+    }
 
     public func connect(_ receiver: DiscoveredReceiver) {
         start(receiver, manual: true)

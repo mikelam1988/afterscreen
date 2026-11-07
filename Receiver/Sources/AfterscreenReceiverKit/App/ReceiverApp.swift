@@ -25,6 +25,8 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     private var statusItem: NSStatusItem!
     private var listener: Listener?
     private var service: NetService?
+    private var connectRequest: ConnectRequest?
+    private var wakeRequest: DispatchWorkItem?
     private var session: ReceiverSession?
     private var screen: ReceiverScreen?
     /// Development: `--panel` size and scale reported instead
@@ -126,6 +128,7 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             publish(port: listener.port, name: name)
             state("Waiting for a sender", "송신기를 기다리는 중")
             watchScreens()
+            watchConnectionRequests()
         } catch {
             state("Cannot listen: \(error)", "연결을 받을 수 없습니다: \(error)")
         }
@@ -148,14 +151,56 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     /// Model and the chosen screen's size, as senders list them
     private func advertise() {
         let hardware = welcome(for: target())
-        let txt: [String: Data] = [
+        var txt: [String: Data] = [
             "model": Data(hardware.marketingName.utf8),
             "panel": Data("\(hardware.panelPixels.width)x\(hardware.panelPixels.height)".utf8),
             "id": Data(settings.deviceID.utf8),
         ]
+        if let request = connectRequest { txt.merge(request.txt) { _, new in new } }
         guard txt != advertised else { return }
         advertised = txt
         service?.setTXTRecord(NetService.data(fromTXTRecord: txt))
+    }
+
+    private var requestedSenderID: String? {
+        if let id = settings.lastSenderID, pairings.key(for: id) != nil { return id }
+        // An existing installation with exactly one pairing needs no setup.
+        return settings.lastSenderID == nil && pairings.pairs.count == 1 ? pairings.pairs.first?.id : nil
+    }
+
+    private func watchConnectionRequests() {
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+            center.publisher(for: name).receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.scheduleConnectionRequest() }.store(in: &cancellables)
+        }
+        settings.$requestConnectionOnWake.dropFirst().receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self = self else { return }
+                if enabled { self.scheduleConnectionRequest() }
+                else { self.wakeRequest?.cancel(); self.connectRequest = nil; self.advertise() }
+            }.store(in: &cancellables)
+        scheduleConnectionRequest()
+    }
+
+    private func scheduleConnectionRequest() {
+        wakeRequest?.cancel()
+        guard settings.requestConnectionOnWake else { return }
+        let work = DispatchWorkItem { [weak self] in self?.requestConnection() }
+        wakeRequest = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+    }
+
+    @objc private func requestConnection() {
+        guard session == nil, let id = requestedSenderID, let key = pairings.key(for: id) else { return }
+        let request = ConnectRequest(senderID: id, receiverID: settings.deviceID, key: key)
+        connectRequest = request
+        advertise()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in
+            guard let self = self, self.connectRequest == request else { return }
+            self.connectRequest = nil
+            self.advertise()
+        }
     }
 
     /// The screen a session would show on now
@@ -268,7 +313,11 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             self?.sendOptions()
             FileHandle.standardError.write(Data("[receiver] Handed over to \(LinkLabel.name(link))\n".utf8))
         }
-        session.onPeer = { [weak self] hello in
+        session.onPeer = { [weak self, weak session] hello in
+            if session?.keyed == true, let id = hello.senderID { self?.settings.lastSenderID = id }
+            self?.wakeRequest?.cancel()
+            self?.connectRequest = nil
+            self?.advertise()
             self?.state("Streaming from \(hello.name)", "\(hello.name)에서 스트리밍 중")
             self?.showStatus(link: link)
             self?.sendOptions()
@@ -383,6 +432,12 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             let stop = NSMenuItem(title: L10n.t("Stop Streaming", "스트리밍 중지"), action: #selector(stopStreaming), keyEquivalent: "")
             stop.target = self
             menu.addItem(stop)
+        }
+        if session == nil, let id = requestedSenderID {
+            let name = pairings.pairs.first { $0.id == id }?.name ?? "Sender"
+            let request = NSMenuItem(title: "Request connection from \(name)", action: #selector(requestConnection), keyEquivalent: "")
+            request.target = self
+            menu.addItem(request)
         }
         let prefs = NSMenuItem(title: L10n.t("Settings…", "설정…"), action: #selector(showSettings), keyEquivalent: ",")
         prefs.target = self

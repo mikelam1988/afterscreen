@@ -53,6 +53,12 @@ public final class ReceiverSettings: ObservableObject {
     @Published public var pairedOnly: Bool {
         didSet { defaults.set(pairedOnly, forKey: Key.pairedOnly) }
     }
+    @Published public var requestConnectionOnWake: Bool {
+        didSet { defaults.set(requestConnectionOnWake, forKey: "requestConnectionOnWake") }
+    }
+    public var lastSenderID: String? {
+        didSet { defaults.set(lastSenderID, forKey: "lastSenderID") }
+    }
     /// This receiver's lasting identity, made once
     public let deviceID: String
 
@@ -108,6 +114,8 @@ public final class ReceiverSettings: ObservableObject {
         self.defaults = defaults
         agentFile = agentDirectory.appendingPathComponent(ReceiverSettings.agentLabel + ".plist")
         self.bundleID = bundleID
+        requestConnectionOnWake = defaults.object(forKey: "requestConnectionOnWake") as? Bool ?? true
+        lastSenderID = defaults.string(forKey: "lastSenderID")
         accept = defaults.enumValue(forKey: Key.accept, default: .any)
         onDisconnect = defaults.enumValue(forKey: Key.onDisconnect, default: .showDesktop)
         language = defaults.enumValue(forKey: Key.language, default: .system)

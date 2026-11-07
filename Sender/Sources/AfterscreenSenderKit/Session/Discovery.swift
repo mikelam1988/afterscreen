@@ -13,6 +13,7 @@ public struct DiscoveredReceiver: Identifiable, Equatable {
     public var addresses: [String]
     /// The receiver's lasting identity; pairing keys follow it
     public var deviceID = ""
+    public var connectRequest: ConnectRequest? = nil
 }
 
 /// Bonjour browse + resolve for receivers; publishes on main queue
@@ -42,6 +43,7 @@ final class Discovery: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
 
     func stop() {
         browser.stop()
+        services.forEach { $0.stopMonitoring() }
     }
 
     /// Resolves `name` again after a failed connection
@@ -102,6 +104,7 @@ final class Discovery: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
     }
 
     private func forget(_ service: NetService) {
+        service.stopMonitoring()
         failures[ObjectIdentifier(service)] = nil
         pending[ObjectIdentifier(service)] = nil
     }
@@ -109,11 +112,21 @@ final class Discovery: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
     func netServiceDidResolveAddress(_ sender: NetService) {
         guard let port = UInt16(exactly: sender.port), port > 0 else { return }
         forget(sender)
-        let txt = sender.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
+        sender.startMonitoring()
+        update(sender, data: sender.txtRecordData())
+    }
+
+    func netService(_ sender: NetService, didUpdateTXTRecord data: Data) {
+        update(sender, data: data)
+    }
+
+    private func update(_ sender: NetService, data: Data?) {
+        guard let port = UInt16(exactly: sender.port), port > 0 else { return }
+        let txt = data.map(NetService.dictionary(fromTXTRecord:)) ?? [:]
         func text(_ key: String) -> String { txt[key].flatMap { String(data: $0, encoding: .utf8) } ?? "" }
         let addresses = (sender.addresses ?? []).compactMap(Discovery.ip(from:))
         let receiver = DiscoveredReceiver(name: sender.name, model: text("model"), panel: text("panel"), port: port,
-                                          host: sender.hostName ?? "", addresses: addresses, deviceID: text("id"))
+                                          host: sender.hostName ?? "", addresses: addresses, deviceID: text("id"), connectRequest: ConnectRequest(txt: txt))
         // Unchanged: a refresh would connect at once, past the backoff
         guard resolved[sender.name] != receiver else { return }
         resolved[sender.name] = receiver

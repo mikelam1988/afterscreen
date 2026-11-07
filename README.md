@@ -124,3 +124,9 @@ MIT. See [LICENSE](LICENSE).
 iMac, Mac and macOS are trademarks of Apple Inc. Thunderbolt is a trademark of Intel Corporation. Afterscreen is not affiliated with or endorsed by Apple.
 
 The demo video shows Big Buck Bunny © 2008 Blender Foundation, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+
+### Receiver-initiated connection (this fork)
+
+Update both apps to 1.0.4. After pairing, Receiver requests its last authenticated sender when it launches or wakes. This is enabled by default and can be turned off in Receiver Settings with **Request last paired sender on launch or wake**. Its menu also offers **Request connection from …** when idle. Existing installations with exactly one pairing use that pairing until a sender connects.
+
+Sender must already be running, reachable, and have Screen Recording permission. Requests expire after two minutes, use the existing pairing key and Bonjour service, and never replace an active connection. This does not wake a sleeping sender, unlock either Mac, or reconnect immediately after Disconnect; a new receiver launch/wake or manual request is needed. Cable-only connections that have never paired cannot use this feature.
