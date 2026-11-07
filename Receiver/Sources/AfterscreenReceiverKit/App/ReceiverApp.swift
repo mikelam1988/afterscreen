@@ -163,7 +163,7 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     }
 
     private var requestedSenderID: String? {
-        if let id = settings.lastSenderID, pairings.key(for: id) != nil { return id }
+        if let id = settings.lastSenderID { return id }
         // An existing installation with exactly one pairing needs no setup.
         return settings.lastSenderID == nil && pairings.pairs.count == 1 ? pairings.pairs.first?.id : nil
     }
@@ -192,7 +192,9 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     }
 
     @objc private func requestConnection() {
-        guard session == nil, let id = requestedSenderID, let key = pairings.key(for: id) else { return }
+        guard session == nil else { return }
+        let id = requestedSenderID ?? "*"
+        let key = pairings.key(for: id)
         let request = ConnectRequest(senderID: id, receiverID: settings.deviceID, key: key)
         connectRequest = request
         advertise()
@@ -315,7 +317,7 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             FileHandle.standardError.write(Data("[receiver] Handed over to \(LinkLabel.name(link))\n".utf8))
         }
         session.onPeer = { [weak self, weak session] hello in
-            if session?.keyed == true, let id = hello.senderID { self?.settings.lastSenderID = id }
+            if session?.trusted == true, let id = hello.senderID { self?.settings.lastSenderID = id }
             self?.wakeRequest?.cancel()
             self?.connectRequest = nil
             self?.advertise()
@@ -464,8 +466,8 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             stop.target = self
             menu.addItem(stop)
         }
-        if session == nil, let id = requestedSenderID {
-            let name = pairings.pairs.first { $0.id == id }?.name ?? "Sender"
+        if session == nil {
+            let name = pairings.pairs.first { $0.id == requestedSenderID }?.name ?? "Sender"
             let request = NSMenuItem(title: L10n.t("Request connection from \(name)", "\(name)에 연결 요청"), action: #selector(requestConnection), keyEquivalent: "")
             request.target = self
             menu.addItem(request)
@@ -502,7 +504,6 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             let window = NSWindow(contentViewController: NSHostingController(rootView: ReceiverSettingsView(settings: settings, pairings: pairings, requestConnection: { [weak self] in
                 guard let self = self else { return "" }
                 guard self.session == nil else { return L10n.t("A sender is already connected or connecting.", "송신기가 이미 연결되어 있거나 연결 중입니다.") }
-                guard self.requestedSenderID != nil else { return L10n.t("Connect and pair with the sender first.", "먼저 송신기에 연결하여 페어링하세요.") }
                 self.requestConnection()
                 return L10n.t("Connection requested. Waiting for the sender…", "연결을 요청했습니다. 송신기를 기다리는 중…")
             })))

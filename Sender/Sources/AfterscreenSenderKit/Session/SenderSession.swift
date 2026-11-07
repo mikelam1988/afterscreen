@@ -91,6 +91,8 @@ public final class SenderSession {
 
     public var onUpdate: ((SenderSnapshot) -> Void)?
     public var onEnd: ((String) -> Void)?
+    /// Unpaired receiver hints may initiate only a physically direct connection.
+    var requiresDirectCable = false
     private var wallpaperPending: (id: UUID, done: (String?) -> Void)?
 
     /// Main queue; complete only after the receiver acknowledges application.
@@ -348,6 +350,7 @@ public final class SenderSession {
         RoutePlanner.routes(to: target) { [weak self] routes in
             DispatchQueue.main.async {
                 guard let self = self, !self.ended else { return }
+                let routes = self.requiresDirectCable ? routes.filter { $0.kind == .thunderbolt || $0.kind == .usb } : routes
                 let chosen = RoutePlanner.select(routes, prefer: self.link)
                 guard !chosen.routes.isEmpty else { return self.end(L10n.t("No Thunderbolt, USB, Ethernet or Wi-Fi route to \(self.target.name)",
                                                                                   "\(self.target.name)까지 Thunderbolt, USB, 이더넷, Wi-Fi 경로가 없습니다")) }
@@ -385,6 +388,10 @@ public final class SenderSession {
     }
 
     private func connected(_ c: Connection, route: Route) {
+        if requiresDirectCable && (c.localInterfaceName == nil || c.localInterfaceName != c.peerInterfaceName) {
+            c.close(reason: "Direct cable is no longer available")
+            return end("Direct cable is no longer available")
+        }
         connection = c
         self.route = route
         let simulated = SenderSession.simulatedLinkMbps
