@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Builds build/Afterscreen.app (sender, arm64, macOS 14+) and
 # build/Afterscreen Receiver.app (universal, macOS 10.15+ Intel / 11+ Apple Silicon)
-# Signs with $AFTERSCREEN_SIGN_IDENTITY, else first Apple Development identity, else ad-hoc
+# Signs with $AFTERSCREEN_SIGN_IDENTITY, .signing-identity, or an Apple Development identity
 # Ad-hoc signature changes per build: macOS re-asks privacy permissions
 set -euo pipefail
 
@@ -15,8 +15,15 @@ SDK_VERSION="$(xcrun --show-sdk-version --sdk macosx)"
 # Receiver bundles the toolchain's back-deployed copy for 10.15, 11
 CONCURRENCY="$(dirname "$(dirname "$(xcrun --find swiftc)")")/lib/swift-5.5/macosx/libswift_Concurrency.dylib"
 [[ -f "$CONCURRENCY" ]] || { print -u2 "Missing $CONCURRENCY"; exit 1 }
-IDENTITY="${AFTERSCREEN_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development/ { print $2; exit }' || true)}"
-IDENTITY="${IDENTITY:--}"
+# Keep a local identity stable across builds; never silently switch to ad-hoc.
+IDENTITY="${AFTERSCREEN_SIGN_IDENTITY:-}"
+if [[ -z "$IDENTITY" && -f "$ROOT/.signing-identity" ]]; then
+    IDENTITY="$(<"$ROOT/.signing-identity")"
+fi
+if [[ -z "$IDENTITY" ]]; then
+    IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development/ { print $2; exit }' || true)"
+fi
+[[ -n "$IDENTITY" ]] || { print -u2 "No signing identity. Set AFTERSCREEN_SIGN_IDENTITY or .signing-identity (use - explicitly for ad-hoc)."; exit 1 }
 print "== Signing identity: $IDENTITY"
 
 mkdir -p "$OUT"
