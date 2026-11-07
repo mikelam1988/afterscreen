@@ -16,21 +16,6 @@ final class ConnectRequestTests: XCTestCase {
         XCTAssertFalse(decoded.verifies(senderID: "sender", receiverID: "receiver", key: Data(repeating: 1, count: 32), now: now))
     }
 
-    func testUnpairedRequestUsesOnlyLastReceiverOnDirectCable() throws {
-        let request = ConnectRequest(senderID: "*", receiverID: "receiver", key: nil, now: now)
-        let decoded = try XCTUnwrap(ConnectRequest(txt: NetService.dictionary(fromTXTRecord: NetService.data(fromTXTRecord: request.txt))))
-        XCTAssertEqual(decoded.cableLink(senderID: "sender", isLastReceiver: true, links: [.wifi, .thunderbolt], now: now), .thunderbolt)
-        XCTAssertEqual(decoded.cableLink(senderID: "sender", isLastReceiver: true, links: [.usb], now: now), .usb)
-        XCTAssertNil(decoded.cableLink(senderID: "sender", isLastReceiver: true, links: [.wifi, .ethernet], now: now))
-        XCTAssertNil(decoded.cableLink(senderID: "sender", isLastReceiver: false, links: [.thunderbolt], now: now))
-        XCTAssertNil(decoded.cableLink(senderID: "sender", isLastReceiver: true, links: [.thunderbolt], now: now.addingTimeInterval(121)))
-        XCTAssertFalse(decoded.verifies(senderID: "sender", receiverID: "receiver", key: key, now: now))
-        let targeted = ConnectRequest(senderID: "other", receiverID: "receiver", key: nil, now: now)
-        XCTAssertNil(targeted.cableLink(senderID: "sender", isLastReceiver: true, links: [.usb], now: now))
-        let signed = ConnectRequest(senderID: "sender", receiverID: "receiver", key: key, now: now)
-        XCTAssertNil(signed.cableLink(senderID: "sender", isLastReceiver: true, links: [.usb], now: now))
-    }
-
     func testExpiredFutureAndTamperedRequestsAreRejected() throws {
         let request = ConnectRequest(senderID: "sender", receiverID: "receiver", key: key, now: now)
         for offset: TimeInterval in [121, -31] {

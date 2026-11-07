@@ -129,7 +129,7 @@ The demo video shows Big Buck Bunny © 2008 Blender Foundation, [CC BY 3.0](http
 
 Update both apps to 1.0.4 or later. After pairing, Receiver requests its last authenticated sender when it launches or wakes. This is enabled by default and can be turned off in Receiver Settings with **Request last paired sender on launch or wake**. Its menu also offers **Request connection from …** when idle. Existing installations with exactly one pairing use that pairing until a sender connects.
 
-Sender must already be running, reachable, and have Screen Recording permission. Requests expire after two minutes, use the existing pairing key and Bonjour service, and never replace an active connection. This does not wake a sleeping sender, unlock either Mac, or reconnect immediately after Disconnect; a new receiver launch/wake or manual request is needed. From 1.0.7, an unpaired Thunderbolt/USB receiver can request its previous sender too, without a pairing code; the sender only accepts this hint for its last receiver and pins that connection to a direct cable. Ethernet/Wi-Fi still use pairing.
+Sender must already be running, reachable, and have Screen Recording permission. Requests expire after two minutes, use the existing pairing key and Bonjour service, and never replace an active connection. This does not wake a sleeping sender, unlock either Mac, or reconnect immediately after Disconnect; a new receiver launch/wake or manual request is needed. Cable-only connections that have never paired cannot use this feature.
 
 ### Preserve permissions across local builds
 
@@ -140,13 +140,3 @@ Use the same Apple signing identity and bundle identifiers for updates. Put the 
 With both apps updated and streaming, open Sender Settings → Wallpaper → **Sync Wallpaper**. The button follows the app language. It copies the main display's current static wallpaper to the receiver's selected display immediately, without reconnecting. A paired connection or direct cable is required. The sender reports success only after the receiver applies the image; older receivers disable the button.
 
 There is no automatic monitoring or restoration on disconnect. Images are converted to JPEG at up to 8192 pixels per side and 16 MB. Animated/dynamic or unavailable wallpaper sources report an error. The receiver keeps the image in its Application Support directory and removes prior synced images after a successful replacement. Screen proportions can change the crop.
-
-### Wake and manual connection (1.0.6)
-
-Sender first attempts reconnection 0.5 seconds after a screen/system wake, with another idle check at 2 seconds and the existing failure backoff. Sleep or a manual disconnect cancels pending wake checks. Actual time to a visible picture still depends on network readiness and stream setup.
-
-Receiver Settings now includes **Request Connection**, independent of the automatic launch/wake toggle. It requests the last paired sender using the same authenticated path as the receiver menu, including after a manual disconnect. It reports a request being sent, not confirmation of a successful connection; it never replaces an existing session.
-
-### Direct-cable request fix (1.0.7)
-
-**Request Connection** no longer requires a pairing record for Thunderbolt/USB. Sender reuses its last receiver and direct-cable connection rules. Update both apps; existing direct-cable users do not need to enter a code or change settings. Requests without a key cannot initiate an unpaired Ethernet/Wi-Fi connection, and invalid signatures never fall back to cable hints.

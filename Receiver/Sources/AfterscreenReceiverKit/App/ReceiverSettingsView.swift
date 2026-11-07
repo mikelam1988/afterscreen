@@ -6,8 +6,6 @@ import SwiftUI
 struct ReceiverSettingsView: View {
     @ObservedObject var settings: ReceiverSettings
     let pairings: PairingStoring
-    var requestConnection: () -> String
-    @State private var connectionRequestStatus: String?
     /// Re-read after a removal; the keychain posts no change
     @State private var paired: [(id: String, name: String)] = []
     /// Re-read as screens come and go
@@ -28,18 +26,9 @@ struct ReceiverSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Toggle(L10n.t("Open at login", "로그인 시 열기"), isOn: Binding(get: { settings.launchAtLogin }, set: { settings.launchAtLogin = $0 }))
-            VStack(alignment: .leading, spacing: 6) {
-                Toggle(L10n.t("Request last sender on launch or wake", "시작 또는 깨우기 시 마지막 송신기에 연결 요청"), isOn: $settings.requestConnectionOnWake)
-                Button(L10n.t("Request Connection", "연결 요청")) {
-                    connectionRequestStatus = requestConnection()
-                }
-                if let status = connectionRequestStatus {
-                    Text(status).font(.caption).foregroundColor(.secondary)
-                }
-                Text(L10n.t("Requests the last sender over a direct cable or paired connection. The sender must be running.",
-                            "직접 연결 케이블 또는 페어링된 연결로 마지막 송신기에 요청합니다. 송신기가 실행 중이어야 합니다."))
-                    .font(.caption).foregroundColor(.secondary)
-            }
+            Toggle("Request last paired sender on launch or wake", isOn: $settings.requestConnectionOnWake)
+            Text("The sender must be running and reachable. Connect and pair once before using this feature.")
+                .font(.caption).foregroundColor(.secondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(L10n.t("Accept connections over", "받을 연결")).font(.headline)
                 Picker("", selection: $settings.accept) {

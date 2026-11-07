@@ -102,7 +102,6 @@ public final class AppModel: ObservableObject {
     /// Lets a waiting sleep proceed
     private var sleepReady: (() -> Void)?
     /// Sleep or a dark wake: no display to stream
-    private var wakeGeneration = UUID()
     private var screensAsleep = CGDisplayIsAsleep(CGMainDisplayID()) != 0
     private let paths = NWPathMonitor()
     private var volumeWatcher: OutputWatcher?
@@ -169,7 +168,6 @@ public final class AppModel: ObservableObject {
         }
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.wakeGeneration = UUID()
             self?.screensAsleep = true
         }
         // Not posted in a dark wake
@@ -188,25 +186,18 @@ public final class AppModel: ObservableObject {
     /// A relink held while screens slept, else auto connect
     private func screensWoke() {
         screensAsleep = false
-        let generation = UUID()
-        wakeGeneration = generation
-        // Try an already-ready link early; retain the old two-second checkpoint.
-        // Session guards avoid duplicate attempts. Normal failure backoff still applies.
-        for delay in [0.5, 2.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self = self, self.wakeGeneration == generation,
-                      self.session == nil, !self.screensAsleep else { return }
-                guard let receiver = self.reconnect else { return self.considerAutoConnect() }
-                self.reconnect = nil
-                self.start(receiver, manual: true)
-            }
+        // The link takes a moment to come back after wake
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self, self.session == nil, !self.screensAsleep else { return }
+            guard let receiver = self.reconnect else { return self.considerAutoConnect() }
+            self.reconnect = nil
+            self.start(receiver, manual: true)
         }
     }
 
     /// Lid closed or Sleep chosen: the iMac powers off first
     /// Sleep waits for the session's end, at most 2 s
     private func willSleep(_ ready: @escaping () -> Void) {
-        wakeGeneration = UUID()
         screensAsleep = true
         retry?.cancel()
         reconnect = nil
@@ -229,13 +220,9 @@ public final class AppModel: ObservableObject {
     /// Consume a valid request once, even across sender restarts. Never replace an active session.
     private func acceptReceiverRequests(_ list: [DiscoveredReceiver]) {
         for receiver in list {
-            guard let request = receiver.connectRequest else { continue }
-            let verified = pairings.key(for: receiver.deviceID).map {
-                request.verifies(senderID: settings.deviceID, receiverID: receiver.deviceID, key: $0)
-            } ?? false
-            let cable = request.cableLink(senderID: settings.deviceID, isLastReceiver: receiver.name == settings.lastReceiver,
-                                          links: links[receiver.name] ?? [])
-            guard verified || cable != nil else { continue }
+            guard let request = receiver.connectRequest,
+                  let key = pairings.key(for: receiver.deviceID),
+                  request.verifies(senderID: settings.deviceID, receiverID: receiver.deviceID, key: key) else { continue }
             let preference = "receiverConnectRequest." + receiver.deviceID
             let now = Date().timeIntervalSince1970
             var seen = (UserDefaults.standard.dictionary(forKey: preference) as? [String: Double] ?? [:])
@@ -245,7 +232,7 @@ public final class AppModel: ObservableObject {
             seen[token] = now
             UserDefaults.standard.set(seen, forKey: preference)
             guard session == nil, !isTesting, sleepReady == nil, CGPreflightScreenCaptureAccess() else { continue }
-            start(receiver, manual: true, linkOverride: verified ? nil : cable)
+            start(receiver, manual: true)
         }
     }
 
@@ -265,7 +252,6 @@ public final class AppModel: ObservableObject {
                     // Change only: rebuilt items close an open link menu
                     if changed {
                         self.links[receiver.name] = kinds
-                        self.acceptReceiverRequests(self.receivers)
                         // A cable may now allow connecting without pairing
                         self.considerAutoConnect()
                     }
@@ -405,7 +391,7 @@ public final class AppModel: ObservableObject {
         session.stop(reason: reason, relink: true)
     }
 
-    private func start(_ receiver: DiscoveredReceiver, manual: Bool, linkOverride: LinkKind? = nil) {
+    private func start(_ receiver: DiscoveredReceiver, manual: Bool) {
         guard session == nil else { return }
         screenRecordingGranted = CGPreflightScreenCaptureAccess()
         guard screenRecordingGranted else {
@@ -421,12 +407,11 @@ public final class AppModel: ObservableObject {
             auto = AutoConnect()
         }
         retry?.cancel()
-        let session = SenderSession(target: receiver, displaySize: settings.displaySize, link: linkOverride ?? settings.link, sound: settings.sound,
+        let session = SenderSession(target: receiver, displaySize: settings.displaySize, link: settings.link, sound: settings.sound,
                                     deband: settings.deband, resolution: settings.streamResolution,
                                     role: settings.displayRole, fit: settings.mirrorFit,
                                     ownBrightness: settings.brightnessFollows ? nil : settings.receiverBrightness,
                                     highRefresh: settings.highRefresh, senderID: settings.deviceID, pairings: pairings)
-        session.requiresDirectCable = linkOverride != nil
         session.onUpdate = { [weak self] s in
             guard let self = self else { return }
             self.follow(pairing: s.pairing, wrongCodes: s.wrongCodes)
@@ -506,7 +491,6 @@ public final class AppModel: ObservableObject {
     /// Pauses automatic connection until the receiver goes away
     /// `powerReceiver`: the receiver Mac follows the end setting
     public func disconnect(powerReceiver: Bool = false) {
-        wakeGeneration = UUID()
         auto.userDisconnected()
         reconnect = nil
         session?.close(power: powerReceiver ? settings.endPower.request : nil)
