@@ -221,7 +221,7 @@ public final class ReceiverSession {
     private var lastHeard = ProcessInfo.processInfo.systemUptime
     /// Quiet past `quietAfter`, or link down: the screen shows it
     private var waiting = false
-    static let quietAfter: TimeInterval = 1
+    static let quietAfter: TimeInterval = 2
     /// Media checks in a row finding this side's link down
     private var downChecks = 0
     private var watchTimer: DispatchSourceTimer?
