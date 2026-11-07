@@ -102,6 +102,7 @@ public final class AppModel: ObservableObject {
     /// Lets a waiting sleep proceed
     private var sleepReady: (() -> Void)?
     /// Sleep or a dark wake: no display to stream
+    private var wakeGeneration = UUID()
     private var screensAsleep = CGDisplayIsAsleep(CGMainDisplayID()) != 0
     private let paths = NWPathMonitor()
     private var volumeWatcher: OutputWatcher?
@@ -168,6 +169,7 @@ public final class AppModel: ObservableObject {
         }
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.wakeGeneration = UUID()
             self?.screensAsleep = true
         }
         // Not posted in a dark wake
@@ -186,18 +188,25 @@ public final class AppModel: ObservableObject {
     /// A relink held while screens slept, else auto connect
     private func screensWoke() {
         screensAsleep = false
-        // The link takes a moment to come back after wake
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self = self, self.session == nil, !self.screensAsleep else { return }
-            guard let receiver = self.reconnect else { return self.considerAutoConnect() }
-            self.reconnect = nil
-            self.start(receiver, manual: true)
+        let generation = UUID()
+        wakeGeneration = generation
+        // Try an already-ready link early; retain the old two-second checkpoint.
+        // Session guards avoid duplicate attempts. Normal failure backoff still applies.
+        for delay in [0.5, 2.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self, self.wakeGeneration == generation,
+                      self.session == nil, !self.screensAsleep else { return }
+                guard let receiver = self.reconnect else { return self.considerAutoConnect() }
+                self.reconnect = nil
+                self.start(receiver, manual: true)
+            }
         }
     }
 
     /// Lid closed or Sleep chosen: the iMac powers off first
     /// Sleep waits for the session's end, at most 2 s
     private func willSleep(_ ready: @escaping () -> Void) {
+        wakeGeneration = UUID()
         screensAsleep = true
         retry?.cancel()
         reconnect = nil
@@ -491,6 +500,7 @@ public final class AppModel: ObservableObject {
     /// Pauses automatic connection until the receiver goes away
     /// `powerReceiver`: the receiver Mac follows the end setting
     public func disconnect(powerReceiver: Bool = false) {
+        wakeGeneration = UUID()
         auto.userDisconnected()
         reconnect = nil
         session?.close(power: powerReceiver ? settings.endPower.request : nil)

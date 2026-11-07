@@ -140,3 +140,9 @@ Use the same Apple signing identity and bundle identifiers for updates. Put the 
 With both apps updated and streaming, open Sender Settings → Wallpaper → **Sync Wallpaper**. The button follows the app language. It copies the main display's current static wallpaper to the receiver's selected display immediately, without reconnecting. A paired connection or direct cable is required. The sender reports success only after the receiver applies the image; older receivers disable the button.
 
 There is no automatic monitoring or restoration on disconnect. Images are converted to JPEG at up to 8192 pixels per side and 16 MB. Animated/dynamic or unavailable wallpaper sources report an error. The receiver keeps the image in its Application Support directory and removes prior synced images after a successful replacement. Screen proportions can change the crop.
+
+### Wake and manual connection (1.0.6)
+
+Sender first attempts reconnection 0.5 seconds after a screen/system wake, with another idle check at 2 seconds and the existing failure backoff. Sleep or a manual disconnect cancels pending wake checks. Actual time to a visible picture still depends on network readiness and stream setup.
+
+Receiver Settings now includes **Request Connection**, independent of the automatic launch/wake toggle. It requests the last paired sender using the same authenticated path as the receiver menu, including after a manual disconnect. It reports a request being sent, not confirmation of a successful connection; it never replaces an existing session.
