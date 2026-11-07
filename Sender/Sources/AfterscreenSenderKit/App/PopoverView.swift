@@ -331,6 +331,19 @@ private struct SettingsPage: View {
             }
             display
             pairings
+            Card(title: L10n.t("Wallpaper", "배경화면")) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Button(model.wallpaperSyncing ? L10n.t("Syncing…", "동기화 중…") : L10n.t("Sync Wallpaper", "배경화면 동기화")) { model.syncWallpaper() }
+                        .disabled(!model.canSyncWallpaper || model.wallpaperSyncing)
+                        .help(L10n.t("Apply this Mac's main display static wallpaper to the receiver screen.", "이 Mac 주 디스플레이의 정적 배경화면을 수신 화면에 적용합니다."))
+                    if let status = model.wallpaperStatus {
+                        Text(status).font(.caption).foregroundStyle(.secondary)
+                    } else if !model.canSyncWallpaper {
+                        Text(L10n.t("Connect to an updated, paired receiver or use a direct cable.", "업데이트된 페어링 수신기에 연결하거나 직접 연결 케이블을 사용하세요."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
             Card(title: L10n.t("Connection", "연결")) {
                 VStack(alignment: .leading, spacing: 8) {
                     SwitchRow(title: L10n.t("Connect automatically", "자동으로 연결"), isOn: $settings.autoConnect)

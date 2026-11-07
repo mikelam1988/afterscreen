@@ -136,6 +136,9 @@ public final class PairingLimiter {
 public final class ReceiverSession {
     public var onEnd: ((String) -> Void)?
     public var onPeer: ((Hello) -> Void)?
+    public var onWallpaper: ((Data, @escaping (String?) -> Void) -> Void)?
+    private var wallpaperBusy = false
+
     /// Read on main by the HUD; written on session queue
     public var peer: Hello? {
         configLock.lock(); defer { configLock.unlock() }
@@ -565,6 +568,27 @@ public final class ReceiverSession {
         case .brightness:
             guard currentPeer != nil, let light = try? BrightnessWire.decode(m.payload) else { return }
             DispatchQueue.main.async { [weak self] in self?.display?.setBrightness(light) }
+        case .wallpaper:
+            guard currentPeer != nil, config?.test == false,
+                  m.payload.count <= WallpaperImage.maxBytes * 2,
+                  let transfer = try? JSONWire.decode(WallpaperTransfer.self, from: m.payload) else { return }
+            let keyed = sessionKey != nil
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                let reply: (String?) -> Void = { [weak self] error in
+                    self?.queue.async { [weak self] in
+                        guard let self = self, !self.ended else { return }
+                        self.connection.send(.wallpaperResult, json: WallpaperResult(id: transfer.id, error: error))
+                    }
+                }
+                guard keyed || self.cable else { return reply(L10n.t("Wallpaper sync requires pairing or a direct cable.", "배경화면 동기화에는 페어링 또는 직접 연결 케이블이 필요합니다.")) }
+                guard !self.wallpaperBusy, let apply = self.onWallpaper else { return reply(L10n.t("Wallpaper sync is unavailable or busy.", "배경화면을 동기화할 수 없거나 이미 동기화 중입니다.")) }
+                self.wallpaperBusy = true
+                apply(transfer.image) { [weak self] error in
+                    self?.wallpaperBusy = false
+                    reply(error)
+                }
+            }
         case .setReceiverOptions:
             guard currentPeer != nil, let change = try? JSONWire.decode(ReceiverOptionsChange.self, from: m.payload) else { return }
             let keyed = sessionKey != nil
@@ -603,7 +627,7 @@ public final class ReceiverSession {
         case .switchover:
             switchOver()
         case .welcome, .probeResult, .pong, .stats, .keyRequest, .cursorChannel, .authOK, .paired, .pairWrong,
-             .handover, .handoverChallenge, .handoverProof, .handoverOK, .receiverOptions:
+             .handover, .handoverChallenge, .handoverProof, .handoverOK, .receiverOptions, .wallpaperResult:
             break
         }
     }

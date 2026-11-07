@@ -216,6 +216,7 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             hardware.panelPixels = o.pixels
             hardware.panelPoints = HardwareInfo.points(forPanel: o.pixels, scale: o.scale ?? HardwareInfo.backingScale(id))
         }
+        hardware.wallpaperSync = true
         return hardware
     }
 
@@ -321,6 +322,36 @@ public final class ReceiverAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             self?.state("Streaming from \(hello.name)", "\(hello.name)에서 스트리밍 중")
             self?.showStatus(link: link)
             self?.sendOptions()
+        }
+        session.onWallpaper = { [weak self, weak session] data, done in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let prepared = Result { try ReceiverWallpaper.save(data) }
+                DispatchQueue.main.async {
+                    switch prepared {
+                    case .failure(let error): done(error.localizedDescription)
+                    case .success(let url):
+                        guard let self = self, let session = session, self.session === session,
+                              let displayID = self.screen?.display,
+                              let screen = NSScreen.screens.first(where: {
+                                  ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == displayID
+                              }) else {
+                            try? FileManager.default.removeItem(at: url)
+                            return done(L10n.t("Receiver screen or connection is no longer available.", "수신 화면 또는 연결을 더 이상 사용할 수 없습니다."))
+                        }
+                        do {
+                            try NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [
+                                .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
+                                .allowClipping: true
+                            ])
+                            ReceiverWallpaper.removeOlder(keeping: url)
+                            done(nil)
+                        } catch {
+                            try? FileManager.default.removeItem(at: url)
+                            done(error.localizedDescription)
+                        }
+                    }
+                }
+            }
         }
         session.onOptionsChange = { [weak self, weak session] change in
             guard let session = session else { return }

@@ -50,6 +50,8 @@ public enum MessageType: UInt8, CaseIterable {
     case receiverOptions = 0x28
     /// A sender's edit; heeded from a proven key or cable
     case setReceiverOptions = 0x29
+    case wallpaper = 0x2A
+    case wallpaperResult = 0x2B
     case probe = 0x30
     case probeResult = 0x31
     case ping = 0x40

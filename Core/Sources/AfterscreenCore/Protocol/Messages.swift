@@ -140,6 +140,8 @@ public struct Welcome: Codable, Equatable {
     /// Per session, 128 bits; set by receivers taking handovers
     /// A new connection proves it, never sends it
     public var handoverToken: Data?
+    /// Optional capability: older receivers must not receive wallpaper messages.
+    public var wallpaperSync: Bool?
 
     public init(protocolVersion: Int, name: String, modelID: String, marketingName: String, osVersion: String,
                 gpuNames: [String], panelPixels: PixelSize, panelPoints: PixelSize,

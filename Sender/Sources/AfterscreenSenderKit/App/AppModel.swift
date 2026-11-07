@@ -30,6 +30,46 @@ public final class AppModel: ObservableObject {
 
     @Published public private(set) var brightnessKeysReady = false
     private let brightnessKeys = BrightnessKeys()
+    @Published public private(set) var wallpaperSyncing = false
+    @Published public private(set) var wallpaperStatus: String?
+
+    public var canSyncWallpaper: Bool {
+        snapshot.isStreaming && !isTesting && snapshot.peer?.wallpaperSync == true && snapshot.receiverOptions?.editable == true
+    }
+
+    public func syncWallpaper() {
+        guard canSyncWallpaper, !wallpaperSyncing, let active = session else { return }
+        let source = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == CGMainDisplayID() }
+            ?? NSScreen.main
+        guard let screen = source, let url = NSWorkspace.shared.desktopImageURL(for: screen) else {
+            wallpaperStatus = L10n.t("Cannot locate the current static wallpaper.", "현재 정적 배경화면을 찾을 수 없습니다.")
+            return
+        }
+        wallpaperSyncing = true
+        wallpaperStatus = L10n.t("Syncing wallpaper…", "배경화면 동기화 중…")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self, weak active] in
+            let result = Result { try WallpaperImage.prepare(url: url) }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard let active = active, self.session === active, self.canSyncWallpaper else {
+                    self.wallpaperSyncing = false
+                    self.wallpaperStatus = L10n.t("Connection changed. Please try again.", "연결이 변경되었습니다. 다시 시도하세요.")
+                    return
+                }
+                switch result {
+                case .failure(let error):
+                    self.wallpaperSyncing = false
+                    self.wallpaperStatus = error.localizedDescription
+                case .success(let image):
+                    active.syncWallpaper(image) { [weak self] error in
+                        self?.wallpaperSyncing = false
+                        self?.wallpaperStatus = error ?? L10n.t("Wallpaper synced.", "배경화면을 동기화했습니다.")
+                    }
+                }
+            }
+        }
+    }
+
     public let settings: SenderSettings
     private var session: SenderSession?
     private let discovery = Discovery()

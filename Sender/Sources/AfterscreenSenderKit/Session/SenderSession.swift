@@ -91,6 +91,28 @@ public final class SenderSession {
 
     public var onUpdate: ((SenderSnapshot) -> Void)?
     public var onEnd: ((String) -> Void)?
+    private var wallpaperPending: (id: UUID, done: (String?) -> Void)?
+
+    /// Main queue; complete only after the receiver acknowledges application.
+    public func syncWallpaper(_ image: Data, done: @escaping (String?) -> Void) {
+        guard snapshot.isStreaming, snapshot.peer?.wallpaperSync == true,
+              snapshot.receiverOptions?.editable == true, wallpaperPending == nil,
+              let connection = connection, !connection.isClosed else { return done(L10n.t("Connect to an updated, trusted receiver first.", "먼저 업데이트된 신뢰할 수 있는 수신기에 연결하세요.")) }
+        let transfer = WallpaperTransfer(image: image)
+        wallpaperPending = (transfer.id, done)
+        connection.send(.wallpaper, json: transfer)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+            guard self?.wallpaperPending?.id == transfer.id else { return }
+            self?.finishWallpaper(L10n.t("Wallpaper sync timed out; the receiver may still apply it.", "배경화면 동기화 응답 시간이 초과되었습니다. 수신기에서 계속 적용할 수 있습니다."))
+        }
+    }
+
+    private func finishWallpaper(_ error: String?) {
+        let done = wallpaperPending?.done
+        wallpaperPending = nil
+        done?(error)
+    }
+
     public private(set) var snapshot = SenderSnapshot()
     /// The receiver's user stopped the stream
     public private(set) var pausedByReceiver = false
@@ -809,6 +831,7 @@ public final class SenderSession {
     }
 
     private func end(_ reason: String) {
+        finishWallpaper(L10n.t("Disconnected before wallpaper sync was confirmed.", "배경화면 동기화를 확인하기 전에 연결이 끊겼습니다."))
         guard !ended else { return }
         ended = true
         // A closing session ends with its own reason
@@ -924,6 +947,10 @@ public final class SenderSession {
             guard let stats = try? JSONWire.decode(ReceiverStats.self, from: m.payload) else { return }
             snapshot.receiver = stats
             testRun?.receiverStats(stats)
+        case .wallpaperResult:
+            guard let result = try? JSONWire.decode(WallpaperResult.self, from: m.payload),
+                  wallpaperPending?.id == result.id else { return }
+            finishWallpaper(result.error)
         case .receiverOptions:
             // Unreadable, as from a newer receiver: no edits offered
             let options = try? JSONWire.decode(ReceiverOptions.self, from: m.payload)
