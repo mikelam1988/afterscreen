@@ -178,8 +178,11 @@ public final class SenderSession {
     /// Main queue: a lost link came back, or did not
     /// `true`: resumed over `to`; `false`: the session ends next
     public var onResume: ((_ resumed: Bool, _ from: LinkKind?, _ to: LinkKind) -> Void)?
-    private var display: VirtualDisplay?
+    /// Kept across a reconnect: AppModel may hold it after this session ends
+    private(set) var display: VirtualDisplay?
     private var capture: Capture?
+    /// Recapture tries after a mid-stream stop, for example a display rearrangement
+    private var captureRetries = 0
     private var cursor: CursorTracker?
     private var streamer: FrameStreamer?
     /// While streaming: no App Nap timer coalescing
@@ -218,6 +221,11 @@ public final class SenderSession {
         self.fit = fit
         self.ownBrightness = ownBrightness
         self.highRefresh = highRefresh
+    }
+
+    /// Reuse a virtual display kept from a previous session
+    func attachDisplay(_ existing: VirtualDisplay?) {
+        display = existing
     }
 
     /// Main queue: nil follows this Mac; a level sets the receiver's
@@ -858,10 +866,10 @@ public final class SenderSession {
         }
         handoff = nil
         stopSound()
-        // Unmirror before the virtual display goes: this Mac's mode returns
+        // Unmirror before this session drops its own mirror set
+        // The virtual display stays: AppModel may keep it for the next session
         osMirror?.stop()
         osMirror = nil
-        display = nil
         connection?.close(reason: reason)
         update {
             $0.isStreaming = false
@@ -1193,13 +1201,18 @@ public final class SenderSession {
         }
         // Mirror captures the main display; extend adds a display
         if mirrorSource == nil {
-            do {
-                let modes = PathPolicy.displayModes(welcome: welcome, stream: config.streamPixels, size: displaySize)
-                display = try VirtualDisplay(name: "Afterscreen — \(welcome.name)", streamPixels: config.streamPixels, hiDPI: welcome.isRetina,
-                                             modes: modes.all, initial: modes.initial, millimeters: PathPolicy.millimeters(welcome),
-                                             refresh: config.frameRate)
-            } catch {
-                return stop(reason: "\(error)")
+            let modes = PathPolicy.displayModes(welcome: welcome, stream: config.streamPixels, size: displaySize)
+            if let existing = display, existing.isAvailable, existing.setMode(points: modes.initial) {
+                // Same virtual display: arrangement (and a dummy mirror) stays
+            } else {
+                display = nil
+                do {
+                    display = try VirtualDisplay(name: "Afterscreen — \(welcome.name)", streamPixels: config.streamPixels, hiDPI: welcome.isRetina,
+                                                 modes: modes.all, initial: modes.initial, millimeters: PathPolicy.millimeters(welcome),
+                                                 refresh: config.frameRate)
+                } catch {
+                    return stop(reason: "\(error)")
+                }
             }
         }
         // After the display: a refused one opens no window there
@@ -1241,14 +1254,19 @@ public final class SenderSession {
         cursor.start()
         self.cursor = cursor
 
-        let capture = Capture(displayID: displayID, size: config.streamPixels, crop: crop)
+        startCapture(displayID: displayID, size: config.streamPixels, crop: crop)
+    }
+
+    /// Start or restart ScreenCaptureKit on the same virtual display
+    private func startCapture(displayID: CGDirectDisplayID, size: PixelSize, crop: CGRect?) {
+        capture?.stop()
+        let capture = Capture(displayID: displayID, size: size, crop: crop)
         capture.onFrame = { [weak streamer] frame in streamer?.offer(frame) }
         capture.onStop = { [weak self] reason in
             DispatchQueue.main.async {
                 // Display off under a power-off: the receiver's bye ends it
-                guard let self = self, self.closing == nil else { return }
-                // Failed here, not the link: the receiver need not wait
-                self.stop(reason: L10n.t("Screen capture stopped: \(reason)", "화면 캡처가 멈췄습니다: \(reason)"))
+                guard let self = self, self.closing == nil, !self.ended else { return }
+                self.handleCaptureStop(reason, displayID: displayID, size: size, crop: crop)
             }
         }
         self.capture = capture
@@ -1260,16 +1278,41 @@ public final class SenderSession {
                     return self.stop(reason: L10n.t("Screen capture failed (\(error.localizedDescription)). Check Screen Recording permission.",
                                                     "화면 캡처에 실패했습니다(\(error.localizedDescription)). 화면 기록 권한을 확인하세요."))
                 }
-                self.activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
-                                                                      reason: "Streaming a display")
+                self.captureRetries = 0
+                let first = self.activity == nil
+                if first {
+                    self.activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical],
+                                                                          reason: "Streaming a display")
+                }
                 self.update {
                     $0.isStreaming = true
                     $0.state = L10n.t("Streaming", "스트리밍 중")
                 }
-                self.startSound()
-                self.sendOutputLevel(playing: self.audioTap != nil)
-                self.startTimers()
+                if first {
+                    self.startSound()
+                    self.sendOutputLevel(playing: self.audioTap != nil)
+                    self.startTimers()
+                }
             }
+        }
+    }
+
+    /// Display sleep ends the stream so the receiver can turn its panel off
+    /// The virtual display is kept for the next session
+    /// A rearrangement retries capture on the same display
+    private func handleCaptureStop(_ reason: String, displayID: CGDirectDisplayID, size: PixelSize, crop: CGRect?) {
+        if CGDisplayIsAsleep(displayID) != 0 {
+            stop(reason: L10n.t("Screen capture stopped: \(reason)", "화면 캡처가 멈췄습니다: \(reason)"))
+            return
+        }
+        guard captureRetries < 3 else {
+            stop(reason: L10n.t("Screen capture stopped: \(reason)", "화면 캡처가 멈췄습니다: \(reason)"))
+            return
+        }
+        captureRetries += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self = self, !self.ended, self.closing == nil else { return }
+            self.startCapture(displayID: displayID, size: size, crop: crop)
         }
     }
 

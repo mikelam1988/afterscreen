@@ -300,6 +300,14 @@ final class PathPolicyTests: XCTestCase {
                        "macOS restored the mirror set: the built-in is no longer active, yet it is the source")
     }
 
+    func testExtendModeLeavesAKeepaliveDummyMirrored() {
+        let dummy: CGDirectDisplayID = 3
+        let panel: CGDirectDisplayID = 1
+        XCTAssertEqual(DisplayMirror.slavesToRelease([dummy, panel], keeping: { $0 == dummy }), [panel])
+        XCTAssertEqual(DisplayMirror.slavesToRelease([dummy], keeping: { $0 == dummy }), [])
+        XCTAssertEqual(DisplayMirror.slavesToRelease([panel], keeping: { $0 == dummy }), [panel])
+    }
+
     func testThePointerMapsOntoTheCroppedArea() {
         let display = CGRect(x: -2048, y: 0, width: 2048, height: 1330)
         let area = CursorTracker.area(display: display, crop: CGRect(x: 0, y: 0, width: 2048, height: 1328))

@@ -25,7 +25,7 @@ public enum VirtualDisplayError: Error, CustomStringConvertible {
     }
 }
 
-/// Extended display backed by CGVirtualDisplay; removed when released
+/// Extended display backed by CGVirtualDisplay; released when the last owner drops it
 /// Registers every "looks like" size, also listed in Displays settings
 public final class VirtualDisplay {
     public let displayID: CGDirectDisplayID
@@ -85,4 +85,7 @@ public final class VirtualDisplay {
     }
 
     public var bounds: CGRect { CGDisplayBounds(displayID) }
+
+    /// Still listed by macOS; may be asleep
+    public var isAvailable: Bool { CGDisplayIsOnline(displayID) != 0 }
 }

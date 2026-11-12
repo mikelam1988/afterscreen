@@ -44,15 +44,32 @@ final class DisplayMirror {
                builtIn: { CGDisplayIsBuiltin($0) != 0 }, mirrorOf: CGDisplayMirrorsDisplay, excluding: target)
     }
 
+    /// HDMI dummy used to keep this Mac's display (and Thunderbolt port) awake
+    /// UGREEN spoofing plug: vendor 0x54F2, product 0xFFFF
+    static let keepaliveVendor: UInt32 = 0x54F2
+    static let keepaliveProduct: UInt32 = 0xFFFF
+
+    static func isKeepaliveDummy(_ id: CGDirectDisplayID) -> Bool {
+        CGDisplayVendorNumber(id) == keepaliveVendor && CGDisplayModelNumber(id) == keepaliveProduct
+    }
+
+    /// Slaves mirroring `target` that extend mode should unmirror
+    /// A keepalive dummy may stay mirrored so the arrangement is not undone
+    static func slavesToRelease(_ mirrored: [CGDirectDisplayID], keeping isDummy: (CGDirectDisplayID) -> Bool) -> [CGDirectDisplayID] {
+        mirrored.filter { !isDummy($0) }
+    }
+
     /// Extend: undoes a mirror set macOS restored for `target`
-    /// true when one was found
+    /// Leaves a keepalive dummy mirroring `target`
+    /// true when one was undone
     @discardableResult
     static func release(_ target: CGDirectDisplayID) -> Bool {
         let mirrored = displays(CGGetOnlineDisplayList).filter { CGDisplayMirrorsDisplay($0) == target }
+        let undo = slavesToRelease(mirrored, keeping: isKeepaliveDummy)
         let leading = CGDisplayMirrorsDisplay(target)
-        mirrored.forEach { _ = configure($0, mirrorOf: kCGNullDirectDisplay) }
+        undo.forEach { _ = configure($0, mirrorOf: kCGNullDirectDisplay) }
         if leading != kCGNullDirectDisplay { _ = configure(target, mirrorOf: kCGNullDirectDisplay) }
-        return !mirrored.isEmpty || leading != kCGNullDirectDisplay
+        return !undo.isEmpty || leading != kCGNullDirectDisplay
     }
 
     private static func displays(_ list: (UInt32, UnsafeMutablePointer<CGDirectDisplayID>?, UnsafeMutablePointer<UInt32>?) -> CGError) -> [CGDirectDisplayID] {

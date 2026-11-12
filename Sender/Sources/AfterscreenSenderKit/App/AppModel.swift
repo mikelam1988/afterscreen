@@ -103,6 +103,10 @@ public final class AppModel: ObservableObject {
     private var sleepReady: (() -> Void)?
     /// Sleep or a dark wake: no display to stream
     private var screensAsleep = CGDisplayIsAsleep(CGMainDisplayID()) != 0
+    /// Virtual display kept across a reconnect, so arrangement and a dummy mirror stay
+    private var retainedDisplay: VirtualDisplay?
+    /// Drop it on Disconnect, Quit, or a settings restart that needs a new display
+    private var dropVirtualDisplay = false
     private let paths = NWPathMonitor()
     private var volumeWatcher: OutputWatcher?
     private var cancellables: Set<AnyCancellable> = []
@@ -387,6 +391,9 @@ public final class AppModel: ObservableObject {
     private func restart(_ reason: String) {
         guard let session = session, !isTesting, !session.isClosing else { return }
         // Bonjour may drop the receiver; the session keeps its target
+        // New modes or a new role need a fresh virtual display
+        dropVirtualDisplay = true
+        retainedDisplay = nil
         reconnect = receivers.first { $0.name == activeReceiver } ?? session.target
         session.stop(reason: reason, relink: true)
     }
@@ -407,6 +414,7 @@ public final class AppModel: ObservableObject {
             auto = AutoConnect()
         }
         retry?.cancel()
+        dropVirtualDisplay = false
         let session = SenderSession(target: receiver, displaySize: settings.displaySize, link: settings.link, sound: settings.sound,
                                     deband: settings.deband, resolution: settings.streamResolution,
                                     role: settings.displayRole, fit: settings.mirrorFit,
@@ -420,6 +428,7 @@ public final class AppModel: ObservableObject {
             self.snapshot = s
             if s.isStreaming { self.auto.streamed() }
             if started {
+                if let display = session.display { self.retainedDisplay = display }
                 // A relink's reason gives way to its outcome
                 self.lastMessage = self.awaitingFasterLink.map { AppModel.fasterLinkOutcome(wanted: $0, got: s.link) }
                 self.awaitingFasterLink = nil
@@ -450,6 +459,7 @@ public final class AppModel: ObservableObject {
             if session?.pausedByReceiver == true {
                 self.auto.userDisconnected()
                 self.reconnect = nil
+                self.dropVirtualDisplay = true
             }
             // Receiver gave way: at once, at most every 5 s
             // Reopened for an edit here: at once, each time
@@ -457,6 +467,16 @@ public final class AppModel: ObservableObject {
             if session?.askedBack == true, self.reconnect == nil, now - self.askedBackAt > 5 || session?.reopened == true {
                 self.askedBackAt = now
                 self.reconnect = self.receivers.first { $0.name == self.activeReceiver } ?? session?.target
+            }
+            // Display sleep: reconnect on wake, keep the virtual display
+            if self.screensAsleep, self.reconnect == nil, session?.pausedByReceiver != true, self.quitDone == nil {
+                self.reconnect = self.receivers.first { $0.name == self.activeReceiver } ?? session?.target
+            }
+            if self.dropVirtualDisplay || self.quitDone != nil {
+                self.retainedDisplay = nil
+                self.dropVirtualDisplay = false
+            } else if let display = session?.display {
+                self.retainedDisplay = display
             }
             self.session = nil
             self.activeReceiver = nil
@@ -482,6 +502,7 @@ public final class AppModel: ObservableObject {
             self.refreshLinks()
         }
         session.flashBlocks = flashBlocks
+        session.attachDisplay(retainedDisplay)
         self.session = session
         activeReceiver = receiver.name
         lastMessage = nil
@@ -493,6 +514,8 @@ public final class AppModel: ObservableObject {
     public func disconnect(powerReceiver: Bool = false) {
         auto.userDisconnected()
         reconnect = nil
+        dropVirtualDisplay = true
+        retainedDisplay = nil
         session?.close(power: powerReceiver ? settings.endPower.request : nil)
     }
 
